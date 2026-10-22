@@ -30,52 +30,45 @@ hp = lambda pw, salt: hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 
 now = lambda: time.strftime("%Y-%m-%d %H:%M")
 
 def new_code(email, purpose="verify"):
-    """Send a verification or password reset code using Resend."""
-    import resend
-
+    """Email a one-time code. SMTP credentials must be set as environment variables."""
     code = str(secrets.randbelow(900000) + 100000)
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    sender = os.environ.get("SMTP_FROM", smtp_user).strip()
 
-    api_key = os.environ.get("RESEND_API_KEY", "").strip()
-    sender = os.environ.get("RESEND_FROM", "").strip()
-
-    if not api_key or not sender:
-        raise ValueError(
-            "Email service is not configured. Check RESEND_API_KEY and RESEND_FROM."
-        )
+    if not smtp_user or not smtp_password or not sender:
+        raise ValueError("Email service is not configured. Set SMTP_USER, SMTP_PASSWORD and SMTP_FROM.")
 
     if purpose == "reset":
-        subject = "SRMS Password Reset Code"
+        subject = "SRMS password reset code"
         action = "reset your SRMS password"
     else:
-        subject = "Verify Your SRMS Email Address"
+        subject = "Verify your SRMS email address"
         action = "verify your SRMS account"
 
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(
+        f"Hello,\n\nYour SRMS code is: {code}\n\n"
+        f"Use this code to {action}. If you did not request this, ignore this email.\n\nSRMS Team"
+    )
+
     try:
-        resend.api_key = api_key
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(message)
+    except (smtplib.SMTPException, OSError) as exc:
+        print(f"Email delivery failed {exc!r}", flush=True)
+        raise ValueError("Could not send the email. Check SMTP settings and try again.") from exc
 
-        result = resend.Emails.send({
-            "from": sender,
-            "to": [email],
-            "subject": subject,
-            "text": (
-                f"Hello,\n\n"
-                f"Your SRMS verification code is: {code}\n\n"
-                f"Use this code to {action}.\n\n"
-                "If you did not request this, ignore this email.\n\n"
-                "SRMS Team"
-            ),
-        })
-
-        print(f"Resend response: {result}", flush=True)
-
-    except Exception as exc:
-        print(f"Resend email delivery failed: {exc!r}", flush=True)
-        raise ValueError(
-            "Could not send the email. Check Resend settings and try again."
-        ) from exc
-
+    # Save the code only after the email was accepted by the SMTP server.
     run("update users set code=? where email=?", (code, email))
-    
+
 def rows(t, me):
     sql = f"select x.*, u.name uname, u.email uemail from {t} x left join users u on u.id=x.uid"
     if T[t]["who"] == "user" and me["role"] != "shelter": sql += f" where x.uid={int(me['id'])}"
