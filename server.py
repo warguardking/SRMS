@@ -63,7 +63,7 @@ def new_code(email, purpose="verify"):
             server.login(smtp_user, smtp_password)
             server.send_message(message)
     except (smtplib.SMTPException, OSError) as exc:
-        print(f"Email delivery failed ({type(exc).__name__}).")
+        print(f"Email delivery failed {exc!r}")
         raise ValueError("Could not send the email. Check SMTP settings and try again.") from exc
 
     # Save the code only after the email was accepted by the SMTP server.
